@@ -8,21 +8,36 @@
 import SwiftUI
 
 struct GameView: View {
+    let gridSize: Int
+    let timerInterval = 1.0
+    
     @State private var colors: [Color] = []
     @State private var selectedIndices: [Int] = []
+    @State private var disabledIndices: Set<Int> = []
     @State private var score: Int = 0
     @State private var timeRemaining: Int = 30
     @State private var isTimerRunning = false
     @State private var showGameOverAlert = false
-    @State private var isGameOver = false
     @State private var showMainMenu = false
-
-    let gridSize = 3
-    let timerInterval = 1.0
-
+    @State private var stage: Int = 1
+    
+    private let availableColors: [Color] = [
+        .red,
+        .green,
+        .blue,
+        .yellow,
+        .orange,
+        .purple,
+        .pink,
+        .cyan,
+        .brown,
+        .indigo,
+        .teal,
+        .accentColor
+    ]
+    
     var body: some View {
         VStack {
-            // Timer and Score Display
             HStack {
                 Text("Time: \(formatTime(timeRemaining))")
                     .font(.title2)
@@ -32,27 +47,29 @@ struct GameView: View {
                     .font(.title2)
                     .padding()
             }
-
-            // Game Grid
+            
             Grid(gridSize: gridSize, items: colors) { index, color in
                 Rectangle()
                     .fill(color)
-                    .frame(width: 100, height: 100)
-                    .onTapGesture {
-                        startTimerIfNeeded()
-                        handleTap(index: index)
-                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .aspectRatio(1, contentMode: .fit)
+                    .opacity(disabledIndices.contains(index) ? 0.2 : 1.0)
                     .overlay(
                         selectedIndices.contains(index) ?
                             RoundedRectangle(cornerRadius: 5)
                                 .stroke(Color.white, lineWidth: 3) :
                             nil
                     )
+                    .onTapGesture {
+                        if !disabledIndices.contains(index) {
+                            startTimerIfNeeded()
+                            handleTap(index: index)
+                        }
+                    }
             }
             .padding()
-            .onAppear(perform: loadColors)
-
-            // Restart Button
+            .onAppear(perform: setupBoard)
+            
             Button("Restart") {
                 restartGame()
             }
@@ -79,80 +96,85 @@ struct GameView: View {
             ContentView()
         }
     }
-
-    // Timer Update Logic
+    
     private func updateTimer() {
         if isTimerRunning && timeRemaining > 0 {
             timeRemaining -= 1
         } else if timeRemaining == 0 {
-            endGame()
+            showGameOverAlert = true
+            isTimerRunning = false
         }
     }
-
-    // Handle Timer Start
+    
     private func startTimerIfNeeded() {
         if !isTimerRunning {
             isTimerRunning = true
         }
     }
-
-    // End Game Logic
-    private func endGame() {
-        isTimerRunning = false
-        showGameOverAlert = true
-        isGameOver = true
-    }
-
-    // Restart Game Logic
+    
     private func restartGame() {
         timeRemaining = 30
         score = 0
+        stage = 1
         selectedIndices.removeAll()
-        loadColors()
+        disabledIndices.removeAll()
+        setupBoard()
         isTimerRunning = false
-        isGameOver = false
+    }
+    
+    private func setupBoard() {
+    let totalTiles = gridSize * gridSize
+    var colorPairs: [Color] = []
+
+    let pairsNeeded = totalTiles / 2
+
+    let selectedColors = availableColors.shuffled().prefix(pairsNeeded)
+    for color in selectedColors {
+        colorPairs.append(color)
+        colorPairs.append(color)
     }
 
-    // Load Random Colors
-    private func loadColors() {
-        let allColors: [Color] = [.red, .green, .blue, .yellow, .orange, .purple]
-        colors = (0..<(gridSize * gridSize))
-            .map { _ in allColors.randomElement() ?? .gray }
+    while colorPairs.count < totalTiles {
+        colorPairs.append(.gray)
     }
 
+    colors = colorPairs.shuffled()
+    selectedIndices.removeAll()
+    disabledIndices.removeAll()
+}
+    
     private func handleTap(index: Int) {
         if selectedIndices.contains(index) {
-            // Undo selection if the tile is already selected
             selectedIndices.removeAll { $0 == index }
             return
         }
-
+        
         selectedIndices.append(index)
-
+        
         if selectedIndices.count == 2 {
             let firstIndex = selectedIndices[0]
             let secondIndex = selectedIndices[1]
-
+            
             if colors[firstIndex] == colors[secondIndex] {
                 score += 1
-
-                colors[firstIndex] = randomColor()
-                colors[secondIndex] = randomColor()
-            } else {
-                endGame() // End game if colors don't match
+                disabledIndices.insert(firstIndex)
+                disabledIndices.insert(secondIndex)
+                
+                if disabledIndices.count == colors.count || colors.count - disabledIndices.count == 1 {
+                    stage += 1
+                    timeRemaining = max(5, timeRemaining - 5)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        setupBoard()
+                    }
+                }
             }
-
+            
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 selectedIndices.removeAll()
             }
         }
     }
-
-    private func randomColor() -> Color {
-        let allColors: [Color] = [.red, .green, .blue, .yellow, .orange, .purple]
-        return allColors.randomElement() ?? .gray
-    }
-
+    
     private func formatTime(_ seconds: Int) -> String {
         let minutes = seconds / 60
         let seconds = seconds % 60
@@ -164,10 +186,13 @@ struct Grid<Content: View>: View {
     let gridSize: Int
     let items: [Color]
     let content: (Int, Color) -> Content
-
+    
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: gridSize)) {
-            ForEach(0..<items.count, id: \..self) { index in
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: gridSize),
+            spacing: 2
+        ) {
+            ForEach(0..<items.count, id: \ .self) { index in
                 content(index, items[index])
             }
         }
